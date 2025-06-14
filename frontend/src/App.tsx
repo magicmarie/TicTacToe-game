@@ -1,14 +1,25 @@
-import { GamePage } from './pages/GamePage';
-import AppHeader from './components/AppBar';
-import './App.css';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
-function App() {
+import AppHeader from "./components/AppBar";
+import { GamePage } from "./pages/GamePage";
+import { AuthForm } from './components/AuthForm';
+import PrivateRoute from './hooks/privateRoute';
+
+export default function App() {
   return (
-    <>
+    <Router>
       <AppHeader />
-      <GamePage />
-    </>
+      <Routes>
+        <Route
+          path="/board"
+          element={
+            <PrivateRoute>
+              <GamePage />
+            </PrivateRoute>
+          }
+        />
+        <Route path="/" element={<AuthForm />} />
+      </Routes>
+    </Router>
   );
 }
-
-export default App;
