@@ -1,14 +1,14 @@
-import { LandingPage } from './pages/LandingPage';
 import { GamePage } from './pages/GamePage';
-import './App.css'
+import AppHeader from './components/AppBar';
+import './App.css';
 
 function App() {
   return (
     <>
-    <LandingPage/>
-    <GamePage/>
+      <AppHeader />
+      <GamePage />
     </>
-  )
+  );
 }
 
-export default App
+export default App;
