@@ -8,29 +8,47 @@ const CONNECTIONS_TABLE = "Connections";
 const USERS_TABLE = "UserStats";
 
 exports.handler = async (event) => {
-  console.log("Incoming event:", event);
-  const { requestContext, queryStringParameters } = event;
+  console.log("Incoming event:", JSON.stringify(event, null, 2));
+
+  const { requestContext } = event;
   const routeKey = requestContext.routeKey;
   const connId = requestContext.connectionId;
-  const body = queryStringParameters;
 
-  const queryParams = event.queryStringParameters || {};
-  const token = queryParams.token || (body && JSON.parse(body).token);
+  let token;
+  let parsedBody = {};
+
+  try {
+    if (event.body) {
+      parsedBody = typeof event.body === "string" ? JSON.parse(event.body) : event.body;
+      token = parsedBody.token;
+    }
+
+    // Token fallback (only applies for $connect)
+    if (!token && event.queryStringParameters) {
+      token = event.queryStringParameters.token;
+    }
+  } catch (err) {
+    console.error("❌ Failed to parse body or extract token:", err);
+    return { statusCode: 400, body: "Bad request format" };
+  }
 
   const user = await verifyCognitoToken(token);
-  if (!user) return { statusCode: 401, body: "Unauthorized" };
+  if (!user) {
+    console.warn("⚠️ Token verification failed.");
+    return { statusCode: 401, body: "Unauthorized" };
+  }
 
   const userId = user.sub;
-  console.log("userId", userId);
+  console.log("✅ Authenticated userId:", userId);
 
   switch (routeKey) {
     case "$connect":
       try {
         await ddb.put({ TableName: CONNECTIONS_TABLE, Item: { connectionId: connId, userId } }).promise();
-        console.log("Successfully wrote to DynamoDB");
+        console.log("✅ Connected user stored in DynamoDB");
         return { statusCode: 200 };
       } catch (error) {
-        console.error("DynamoDB write failed:", error);
+        console.error("❌ DynamoDB error on $connect:", error);
         return { statusCode: 500, body: "Failed to connect" };
       }
 
@@ -39,19 +57,18 @@ exports.handler = async (event) => {
       return { statusCode: 200 };
 
     case "joinRoom":
-      const parsedBody = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-      return await joinRoom(parsedBody, userId, connId);
+      return await joinRoom(userId, connId);
 
     case "makeMove":
-      const parsedMakeMoveData = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-      return await handleMove(parsedMakeMoveData, userId);
+      return await handleMove(parsedBody, userId);
 
     default:
+      console.log("⚠️ Default route hit. Event:", JSON.stringify(event, null, 2));
       return { statusCode: 400, body: "Unknown action" };
   }
 };
 
-async function joinRoom(data, userId, connId) {
+async function joinRoom(userId, connId) {
   // Find an existing room with one player
   const availableRooms = await ddb.scan({
     TableName: ROOMS_TABLE,
