@@ -29,7 +29,7 @@ export const formatUsername = (email?: string) => {
 };
 
 const GamePage: React.FC = () => {
-  const [opponentName, setOpponentName] = useState('');
+  const [opponentName, setOpponentName] = useState(localStorage.getItem("opponent") ||'');
   const [infoMsg, setInfoMsg] = useState('');
   const [error, setError] = useState('');
   const [gameBoardKey, setGameBoardKey] = useState(0);
