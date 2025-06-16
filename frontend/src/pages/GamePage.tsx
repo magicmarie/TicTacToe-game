@@ -13,6 +13,7 @@ import { useWebSocket } from '../context/useWebSocket';
 import { addGamePageListener } from '../lib/websocket';
 import { type WebSocketMessage, type UserStat } from '../types';
 import { StatsOverlay } from '../components/StatsOverlay';
+import { useNavigate } from 'react-router-dom';
 
 export type Player = 'X' | 'O';
 
@@ -43,13 +44,8 @@ const getStatusColor = (
   }
 };
 
-const createEmptyBoard = (): string[][] => [
-  ['', '', ''],
-  ['', '', ''],
-  ['', '', ''],
-];
-
 const GamePage: React.FC = () => {
+  const navigate = useNavigate();
   const [statsOpen, setStatsOpen] = useState(false);
   const [opponentName, setOpponentName] = useState(
     localStorage.getItem('opponent') || ''
@@ -256,8 +252,15 @@ const GamePage: React.FC = () => {
     }
 
     if (wsData.message === 'roomRestarted') {
-      setBoard(wsData?.room?.board || createEmptyBoard());
-      setCurrentTurn(wsData.currentTurn || null);
+      if (wsData?.room?.board) {
+        setBoard(wsData?.room?.board);
+        localStorage.setItem('board', JSON.stringify(wsData?.room?.board));
+      }
+
+      if (wsData?.room?.currentTurn) {
+        setCurrentTurn(wsData?.room?.currentTurn);
+        localStorage.setItem('currentTurn', wsData?.room?.currentTurn);
+      }
       setWinnerMsg('');
       setGameBoardKey((k) => k + 1);
       setInfoMsg('Game has been restarted.');
@@ -285,10 +288,13 @@ const GamePage: React.FC = () => {
     if (!token) return;
     console.log('leaving room...');
     sendMessage({ action: 'leaveRoom', token });
+    localStorage.clear();
+    navigate('/');
   };
 
   const handleRestartGame = () => {
     if (!token) return;
+    console.log('Restarting Game...', roomId)
     sendMessage({ action: 'restart', token, roomId });
   };
 
@@ -301,8 +307,8 @@ const GamePage: React.FC = () => {
   const bothPlayersJoined = players.X && players.O && mySymbol;
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: '2rem' }}>
+    <Container maxWidth="lg" sx={{ py: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
         <Typography sx={{ mb: 1 }}>
           WebSocket status:{' '}
           <strong

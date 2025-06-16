@@ -5,7 +5,10 @@ export const lightTheme = createTheme({
     mode: 'light',
     primary: {
       main: '#0a192f'
-    }
+    },
+    secondary: {
+      main: '#00b4d8', // O player
+    },
   }
 }); 
 

@@ -21,7 +21,7 @@ export const GameBoard = ({
   initialBoard,
   currentTurn,
   winner,
-  handleRestart
+  handleRestart,
 }: GameBoardProps) => {
   const handleMove = (row: number, col: number) => {
     if (
@@ -33,7 +33,7 @@ export const GameBoard = ({
       return;
     }
 
-    console.log('Made a move')
+    console.log('Made a move');
     // Send move via websocket
     sendMessage({
       action: 'makeMove',
@@ -47,7 +47,9 @@ export const GameBoard = ({
   return (
     <Container maxWidth="sm" sx={{ textAlign: 'center' }}>
       <Typography variant="h6">You are {mySymbol}</Typography>
-      <Typography variant="subtitle2">Opponent: {formatUsername(opponentName)}</Typography>
+      <Typography variant="subtitle2">
+        Opponent: {formatUsername(opponentName)}
+      </Typography>
       <Box my={2}>
         {winner ? (
           <Typography>Game over</Typography>
@@ -64,7 +66,7 @@ export const GameBoard = ({
                 <Paper
                   elevation={3}
                   onClick={() => handleMove(rowIndex, colIndex)}
-                  sx={{
+                  sx={(theme) => ({
                     aspectRatio: '1',
                     display: 'flex',
                     alignItems: 'center',
@@ -74,9 +76,16 @@ export const GameBoard = ({
                       cell || winner || currentTurn !== mySymbol
                         ? 'not-allowed'
                         : 'pointer',
-                    backgroundColor: cell ? 'primary.light' : 'grey.100',
+                    backgroundColor: cell
+                      ? cell === 'X'
+                        ? theme.palette.primary.main
+                        : theme.palette.secondary.main
+                      : theme.palette.background.paper,
+                    color: cell ? '#ffffff' : theme.palette.text.primary,
+                    fontWeight: 'bold',
                     userSelect: 'none',
-                  }}
+                    border: `2px solid ${theme.palette.divider}`,
+                  })}
                 >
                   {cell}
                 </Paper>
@@ -85,7 +94,12 @@ export const GameBoard = ({
           )}
       </Grid>
 
-      <Button onClick={handleRestart}>
+      <Button
+        onClick={handleRestart}
+        color="secondary"
+        variant="contained"
+        sx={{ border: 'none', marginTop: '1rem' }}
+      >
         Restart
       </Button>
     </Container>
