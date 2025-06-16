@@ -28,8 +28,12 @@ export const AuthForm = () => {
         'Signup successful! Check your email for the confirmation code.'
       );
       setStep('confirm');
-    } catch (err: any) {
-      setMessage(err.message || 'Error signing up');
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        setMessage((err as { message?: string }).message || 'Error signing up');
+      } else {
+        setMessage('Error signing up');
+      }
     }
     setLoading(false);
   };
@@ -40,8 +44,14 @@ export const AuthForm = () => {
       await confirmRegister(email, code);
       setMessage('Account confirmed! You can now sign in.');
       setStep('signin');
-    } catch (err: any) {
-      setMessage(err.message || 'Error confirming account');
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        setMessage(
+          (err as { message?: string }).message || 'Error confirming account'
+        );
+      } else {
+        setMessage('Error confirming account');
+      }
     }
     setLoading(false);
   };
@@ -52,18 +62,22 @@ export const AuthForm = () => {
       const response = await login(email, password);
       const session = await fetchSession();
       const idToken = session.tokens?.idToken?.toString();
-      console.log(
-        session,
-        'session',
-      );
+      console.log(session, 'session');
       localStorage.setItem('token', idToken ?? '');
       localStorage.setItem('isSignedIn', response.isSignedIn.toString());
-      localStorage.setItem('userEmail', session.tokens?.signInDetails?.loginId ?? '');
+      localStorage.setItem(
+        'userEmail',
+        session.tokens?.signInDetails?.loginId ?? ''
+      );
       localStorage.setItem('userId', session.userSub ?? '');
       setMessage('Signed in successfully!');
       navigate('/board');
-    } catch (err: any) {
-      setMessage(err.message || 'Error signing in');
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        setMessage((err as { message?: string }).message || 'Error signing in');
+      } else {
+        setMessage('Error signing in');
+      }
     }
     setLoading(false);
   };

@@ -1,4 +1,3 @@
-// src/pages/GamePage.tsx
 import { useEffect, useState } from 'react';
 import {
   Container,
@@ -13,12 +12,20 @@ import {
 import { GameBoard } from '../components/GameBoard';
 import { useWebSocket } from '../context/useWebSocket';
 import { addGamePageListener } from '../lib/websocket';
+import { type WebSocketMessage } from '../types';
 
 export type Player = 'X' | 'O';
 
 type PlayerData = {
   name: string;
   symbol: Player;
+  id: string;
+};
+
+export const formatUsername = (email?: string) => {
+  if (!email) return '---';
+  const username = email.split('@')[0];
+  return username.charAt(0).toUpperCase() + username.slice(1);
 };
 
 const GamePage: React.FC = () => {
@@ -86,7 +93,6 @@ const GamePage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Only save if joinedRoom is true (game started)
     if (joinedRoom) {
       localStorage.setItem('joinedRoom', 'true');
     } else {
@@ -99,7 +105,6 @@ const GamePage: React.FC = () => {
       localStorage.removeItem('roomId');
     }
 
-    // Save players only if both players are not null or at least one player exists
     if (players && (players.X !== null || players.O !== null)) {
       localStorage.setItem('players', JSON.stringify(players));
     }
@@ -133,75 +138,92 @@ const GamePage: React.FC = () => {
 
     setMyName(email);
 
-    const handleMessage = (data: any) => {
-      console.log('WebSocket message received in GamePage:', data);
-      localStorage.setItem('data', JSON.stringify(data));
+    const handleMessage = (data: unknown) => {
+      const wsData = data as WebSocketMessage;
+      console.log('WebSocket message received in GamePage:', wsData);
+      localStorage.setItem('data', JSON.stringify(wsData));
 
-      if (data.message?.includes('roomUpdate')) {
+      if (wsData.message?.includes('roomUpdate')) {
         setJoinedRoom(true);
-        setRoomId(data.room?.roomId || null);
-        localStorage.setItem('roomId', data.room?.roomId || '');
+        setRoomId(wsData.room?.roomId || '');
+        localStorage.setItem('roomId', wsData.room?.roomId || '');
 
-        if (data.room?.board) setBoard(data.room.board);
-        if (data.room?.currentTurn) setCurrentTurn(data.room.currentTurn);
+        if (wsData.room?.board) setBoard(wsData.room.board);
+        if (wsData.room?.currentTurn) setCurrentTurn(wsData.room.currentTurn);
 
         const map: Record<Player, PlayerData | null> = { X: null, O: null };
-        data.room?.players?.forEach((p: any) => {
-          map[p.symbol as Player] = {
-            name: p.userId,
-            symbol: p.symbol,
+        wsData.room?.players?.forEach((p: unknown) => {
+          const player = p as { userId: string; symbol: Player; email: string };
+          map[player.symbol as Player] = {
+            name: player.email,
+            id: player.userId,
+            symbol: player.symbol,
           };
         });
-        console.log(map, 'MAP____');
-        console.log(data.room.players, '----DDDDD');
+
         setPlayers(map);
-        const me = data.room.players.find(
-          (p: any) => p.userId === userID || p.userEmail === email
-        );
-        console.log(me, 'me-----');
+        const me = wsData.room?.players
+          ? wsData.room.players.find(
+              (p: { userId: string; email?: string; symbol: Player }) =>
+                p.userId === userID || p.email === email
+            )
+          : undefined;
+
         if (me) setMySymbol(me.symbol);
 
-        // Also set opponent name
         const opp = me?.symbol === 'X' ? map.O : map.X;
         setOpponentName(opp?.name || '');
+        localStorage.setItem("opponent", opp?.name || '');
 
-        setInfoMsg(data.message || '');
+        setInfoMsg(wsData.message || '');
         return;
       }
 
-      if (data.type === 'moveUpdate') {
-        if (data.board) {
-          setBoard(data.board);
-          localStorage.setItem('board', JSON.stringify(data.board));
+      if (wsData.type === 'moveUpdate') {
+        if (wsData.board) {
+          setBoard(wsData.board);
+          localStorage.setItem('board', JSON.stringify(wsData.board));
         }
 
-        if (data.nextTurn) {
-          setCurrentTurn(data.currentTurn);
-          localStorage.setItem('currentTurn', data.currentTurn);
+        if (wsData.currentTurn) {
+          setCurrentTurn(wsData.currentTurn);
+          localStorage.setItem('currentTurn', wsData.currentTurn);
         }
 
-        if (data.gameOver) {
-          setWinnerMsg(data.winner === 'draw' ? 'Game is a draw!' : `${data.winner} wins!`)
+        if (wsData.gameOver) {
+          console.log('called', wsData.gameOver, '--', wsData);
+          setWinnerMsg(
+            wsData.winner === 'draw'
+              ? 'Game is a draw!'
+              : `${wsData.winner} wins!`
+          );
           setGameBoardKey((k) => k + 1);
         }
       }
 
-      if (data.type === 'playerUpdate') {
+      if (wsData.type === 'playerUpdate') {
         const map: Record<Player, PlayerData | null> = { X: null, O: null };
-        data.players.forEach((p: any) => {
-          map[p.symbol as Player] = {
-            name: p.userEmail,
-            symbol: p.symbol,
-          };
-        });
+        if (wsData.players) {
+          wsData.players.forEach(
+            (p: { userId: string; email?: string; symbol: Player }) => {
+              map[p.symbol as Player] = {
+                name: p.email || '',
+                symbol: p.symbol,
+                id: p.userId,
+              };
+            }
+          );
+        }
         setPlayers(map);
         const opp = mySymbol === 'X' ? map.O : map.X;
         setOpponentName(opp?.name || '');
       }
 
-      if (data.type === 'gameOver') {
+      if (wsData.type === 'gameOver') {
         alert(
-          data.winner === 'draw' ? 'Game is a draw!' : `${data.winner} wins!`
+          wsData.winner === 'draw'
+            ? 'Game is a draw!'
+            : `${wsData.winner} wins!`
         );
         setGameBoardKey((k) => k + 1);
       }
@@ -212,7 +234,6 @@ const GamePage: React.FC = () => {
 
   const handleJoinRoom = () => {
     if (!token) return;
-    console.log('working--');
     sendMessage({ action: 'joinRoom', token });
   };
 
@@ -231,7 +252,7 @@ const GamePage: React.FC = () => {
           <Alert severity="success" sx={{ mb: 2 }}>
             {infoMsg}
           </Alert>
-          <Alert severity="success" sx={{ mb: 2 }}>{winnerMsg}</Alert>
+
           <Snackbar
             open={!!infoMsg}
             autoHideDuration={3000}
@@ -239,6 +260,11 @@ const GamePage: React.FC = () => {
             message={infoMsg}
           />
         </>
+      )}
+      {winnerMsg && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          {winnerMsg}
+        </Alert>
       )}
       {!joinedRoom ? (
         <Box textAlign="center" mt={5}>
@@ -273,28 +299,43 @@ const GamePage: React.FC = () => {
             }}
           >
             <Box flex={1}>
-              {/* {bothPlayersJoined && board ? ( */}
-              <GameBoard
-                key={gameBoardKey}
-                mySymbol={mySymbol}
-                myName={myName}
-                opponentName={opponentName}
-                initialBoard={board}
-                currentTurn={currentTurn}
-              />
-              {/* // ) : (
-              //   <Typography align="center" sx={{ mt: 5 }}>
-              //     Waiting for a second player to join...
-              //   </Typography>
-              // )} */}
+              {bothPlayersJoined && board ? (
+                <GameBoard
+                  key={gameBoardKey}
+                  mySymbol={
+                    mySymbol === 'X' || mySymbol === 'O'
+                      ? (mySymbol as Player)
+                      : null
+                  }
+                  myName={myName}
+                  opponentName={opponentName}
+                  initialBoard={board}
+                  winner={winnerMsg !== ''}
+                  currentTurn={currentTurn as Player | null}
+                />
+              ) : (
+                <Typography align="center" sx={{ mt: 5 }}>
+                  Waiting for a second player to join...
+                </Typography>
+              )}
             </Box>
             <Grid size={12}>
               <Paper sx={{ p: 2 }}>
                 <Typography variant="subtitle1" gutterBottom>
                   Players:
                 </Typography>
-                <Typography>X: {players.X?.name || '---'}</Typography>
-                <Typography>O: {players.O?.name || '---'}</Typography>
+                <Typography>
+                  X:{' '}
+                  {players.X?.name
+                    ? formatUsername(players.X?.name)
+                    : '---'}
+                </Typography>
+                <Typography>
+                  O:{' '}
+                  {players.O?.name
+                    ? formatUsername(players.O?.name)
+                    : '---'}
+                </Typography>
                 {currentTurn && (
                   <Typography sx={{ mt: 1 }}>
                     <strong>Current Turn:</strong> {currentTurn}

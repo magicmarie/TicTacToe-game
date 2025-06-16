@@ -1,9 +1,9 @@
 const WEBSOCKET_URL = 'wss://821gxv78hl.execute-api.us-east-2.amazonaws.com/production';
 
 let socket: WebSocket | null = null;
-let gamePageListeners: ((data: any) => void)[] = [];
+let gamePageListeners: ((data: unknown) => void)[] = [];
 
-export const connectSocket = (onMessage: (data: any) => void) => {
+export const connectSocket = (onMessage: (data: unknown) => void) => {
   const token = localStorage.getItem('token');
   if (!token) {
     console.error('No token found');
@@ -35,7 +35,7 @@ export const connectSocket = (onMessage: (data: any) => void) => {
   addGamePageListener(onMessage);
 };
 
-export const addGamePageListener = (listener: (data: any) => void) => {
+export const addGamePageListener = (listener: (data: unknown) => void) => {
   if (!gamePageListeners.includes(listener)) gamePageListeners.push(listener);
 };
 
