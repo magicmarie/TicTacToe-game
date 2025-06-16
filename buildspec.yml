@@ -8,6 +8,10 @@ phases:
   build:
     commands:
       - npm run build
+  post_build:
+    commands:
+      - echo "Syncing files to S3 with proper content-types..."
+      - aws s3 sync dist s3://omegahadijah-rtt/ --delete --content-type text/html --exclude "*" --include "*.html"
 artifacts:
   files:
     - '**/*'
