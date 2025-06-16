@@ -305,6 +305,7 @@ const GamePage: React.FC = () => {
   };
 
   const bothPlayersJoined = players.X && players.O && mySymbol;
+  const isAlreadyInRoom = players.X?.id === userID || players.O?.id === userID;
 
   return (
     <Container maxWidth="lg" sx={{ py: 2 }}>
@@ -365,7 +366,7 @@ const GamePage: React.FC = () => {
           <Button
             variant="contained"
             size="large"
-            disabled={joinedRoom}
+            disabled={joinedRoom || isAlreadyInRoom}
             onClick={handleJoinRoom}
           >
             Join Game Room
