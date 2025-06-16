@@ -56,6 +56,9 @@ exports.handler = async (event) => {
     case "leaveRoom":
       return await leaveRoom(userId);
 
+    case "restart":
+      return await restartGame(userId, connId, parsedBody.roomId);
+      
     case "getStats":
       return await getUserStats(userId, connId);
 
@@ -274,6 +277,48 @@ async function getUserStats(userId, connId) {
     }).promise();
   } catch (err) {
     console.error("❌ Failed to send stats:", err);
+  }
+
+  return { statusCode: 200 };
+}
+
+async function restartGame(userId, connId, roomId) {
+  const res = await ddb.get({ TableName: ROOMS_TABLE, Key: { roomId } }).promise();
+  const room = res.Item;
+  if (!room) return { statusCode: 404, body: "Room not found" };
+
+  // Check if user is part of the room
+  const player = room.players.find(p => p.userId === userId);
+  if (!player) return { statusCode: 403, body: "Not part of this room" };
+
+  // Reset the game
+  room.board = [["", "", ""], ["", "", ""], ["", "", ""]];
+  room.currentTurn = "X";
+
+  await ddb.put({ TableName: ROOMS_TABLE, Item: room }).promise();
+
+  const playersWithEmails = await Promise.all(
+    room.players.map(async p => ({
+      ...p,
+      email: await getUserEmail(p.userId)
+    }))
+  );
+
+  const message = {
+    message: "roomRestarted",
+    room: { ...room, players: playersWithEmails }
+  };
+
+  // Send the reset info to both players
+  for (const p of room.players) {
+    try {
+      await apiGateway.postToConnection({
+        ConnectionId: p.connId,
+        Data: JSON.stringify(message)
+      }).promise();
+    } catch (err) {
+      console.error(`❌ Failed to notify ${p.connId}`, err);
+    }
   }
 
   return { statusCode: 200 };
