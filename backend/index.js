@@ -1,3 +1,4 @@
+// === index.js ===
 const AWS = require("aws-sdk");
 const { v4: uuidv4 } = require("uuid");
 const { verifyCognitoToken } = require("./utils/auth");
@@ -6,10 +7,13 @@ const ddb = new AWS.DynamoDB.DocumentClient();
 const ROOMS_TABLE = "GameRooms";
 const CONNECTIONS_TABLE = "Connections";
 const USERS_TABLE = "UserStats";
+const apiGateway = new AWS.ApiGatewayManagementApi({
+  apiVersion: "2018-11-29",
+  endpoint: "821gxv78hl.execute-api.us-east-2.amazonaws.com/production",
+});
 
 exports.handler = async (event) => {
   console.log("Incoming event:", JSON.stringify(event, null, 2));
-
   const { requestContext } = event;
   const routeKey = requestContext.routeKey;
   const connId = requestContext.connectionId;
@@ -22,35 +26,22 @@ exports.handler = async (event) => {
       parsedBody = typeof event.body === "string" ? JSON.parse(event.body) : event.body;
       token = parsedBody.token;
     }
-
-    // Token fallback (only applies for $connect)
     if (!token && event.queryStringParameters) {
       token = event.queryStringParameters.token;
     }
   } catch (err) {
-    console.error("❌ Failed to parse body or extract token:", err);
+    console.error("Failed to parse body or extract token:", err);
     return { statusCode: 400, body: "Bad request format" };
   }
 
   const user = await verifyCognitoToken(token);
-  if (!user) {
-    console.warn("⚠️ Token verification failed.");
-    return { statusCode: 401, body: "Unauthorized" };
-  }
-
+  if (!user) return { statusCode: 401, body: "Unauthorized" };
   const userId = user.sub;
-  console.log("✅ Authenticated userId:", userId);
 
   switch (routeKey) {
     case "$connect":
-      try {
-        await ddb.put({ TableName: CONNECTIONS_TABLE, Item: { connectionId: connId, userId } }).promise();
-        console.log("✅ Connected user stored in DynamoDB");
-        return { statusCode: 200 };
-      } catch (error) {
-        console.error("❌ DynamoDB error on $connect:", error);
-        return { statusCode: 500, body: "Failed to connect" };
-      }
+      await ddb.put({ TableName: CONNECTIONS_TABLE, Item: { connectionId: connId, userId } }).promise();
+      return { statusCode: 200 };
 
     case "$disconnect":
       await ddb.delete({ TableName: CONNECTIONS_TABLE, Key: { connectionId: connId } }).promise();
@@ -60,42 +51,114 @@ exports.handler = async (event) => {
       return await joinRoom(userId, connId);
 
     case "makeMove":
-      return await handleMove(parsedBody, userId);
+      return await handleMove(parsedBody, userId, connId);
+
+    case "leaveRoom":
+      return await leaveRoom(userId);
+
+    case "getStats":
+      return await getUserStats(userId, connId);
 
     default:
-      console.log("⚠️ Default route hit. Event:", JSON.stringify(event, null, 2));
       return { statusCode: 400, body: "Unknown action" };
   }
 };
 
 async function joinRoom(userId, connId) {
-  // Find an existing room with one player
+  let roomId;
+  let room;
   const availableRooms = await ddb.scan({
     TableName: ROOMS_TABLE,
     FilterExpression: "size(players) = :size",
-    ExpressionAttributeValues: {
-      ":size": 1
-    }
+    ExpressionAttributeValues: { ":size": 1 }
   }).promise();
 
   if (availableRooms.Items.length > 0) {
-    // Join the first available room
-    const room = availableRooms.Items[0];
+    room = availableRooms.Items[0];
     room.players.push({ userId, connId, symbol: "O" });
     await ddb.put({ TableName: ROOMS_TABLE, Item: room }).promise();
-    return { statusCode: 200, body: JSON.stringify({ message: "Joined room as second player", roomId: room.roomId }) };
+    roomId = room.roomId;
   } else {
-    // Create a new room
-    const roomId = uuidv4();
-    const newRoom = {
+    roomId = uuidv4();
+    room = {
       roomId,
       players: [{ userId, connId, symbol: "X" }],
       board: [["", "", ""], ["", "", ""], ["", "", ""]],
       currentTurn: "X"
     };
-    await ddb.put({ TableName: ROOMS_TABLE, Item: newRoom }).promise();
-    return { statusCode: 200, body: JSON.stringify({ message: "Created new room and joined as first player", roomId }) };
+    await ddb.put({ TableName: ROOMS_TABLE, Item: room }).promise();
   }
+
+  const playersWithEmails = await Promise.all(
+    room.players.map(async player => ({
+      ...player,
+      email: await getUserEmail(player.userId)
+    }))
+  );
+
+  const message = {
+    message: "roomUpdate",
+    room: { ...room, players: playersWithEmails }
+  };
+
+  for (const player of room.players) {
+    try {
+      await apiGateway.postToConnection({
+        ConnectionId: player.connId,
+        Data: JSON.stringify(message)
+      }).promise();
+    } catch (err) {
+      console.error(`Notify failed: ${player.connId}`, err);
+    }
+  }
+
+  return { statusCode: 200 };
+}
+
+async function leaveRoom(userId) {
+  const rooms = await ddb.scan({
+    TableName: ROOMS_TABLE,
+    FilterExpression: "contains(players, :userId)",
+    ExpressionAttributeValues: { ":userId": userId }
+  }).promise();
+
+  if (rooms.Items.length === 0) return { statusCode: 404, body: "Room not found" };
+
+  const room = rooms.Items[0];
+  room.players = room.players.filter(p => p.userId !== userId);
+
+  if (room.players.length === 1) {
+    // Update stats: remaining user wins
+    await updateScores([room.players[0], { userId }], room.players[0].symbol);
+    await ddb.put({ TableName: ROOMS_TABLE, Item: room }).promise();
+
+    const playersWithEmails = await Promise.all(
+      room.players.map(async player => ({
+        ...player,
+        email: await getUserEmail(player.userId)
+      }))
+    );
+
+    const message = {
+      message: "roomUpdate",
+      room: { ...room, players: playersWithEmails }
+    };
+
+    for (const player of room.players) {
+      try {
+        await apiGateway.postToConnection({
+          ConnectionId: player.connId,
+          Data: JSON.stringify(message)
+        }).promise();
+      } catch (err) {
+        console.error(`Notify failed: ${player.connId}`, err);
+      }
+    }
+  } else {
+    await ddb.delete({ TableName: ROOMS_TABLE, Key: { roomId: room.roomId } }).promise();
+  }
+
+  return { statusCode: 200 };
 }
 
 function checkWinner(board) {
@@ -115,7 +178,7 @@ function checkWinner(board) {
   return null;
 }
 
-async function handleMove(data, userId) {
+async function handleMove(data, userId, connId) {
   const { roomId, row, col } = data;
   const res = await ddb.get({ TableName: ROOMS_TABLE, Key: { roomId } }).promise();
   const room = res.Item;
@@ -133,12 +196,35 @@ async function handleMove(data, userId) {
   if (winner || isDraw) {
     await updateScores(room.players, winner);
     await ddb.delete({ TableName: ROOMS_TABLE, Key: { roomId } }).promise();
-    return { statusCode: 200, body: JSON.stringify({ gameOver: true, winner: winner || "draw" }) };
   } else {
     room.currentTurn = room.currentTurn === "X" ? "O" : "X";
     await ddb.put({ TableName: ROOMS_TABLE, Item: room }).promise();
-    return { statusCode: 200, body: JSON.stringify({ board: room.board, nextTurn: room.currentTurn }) };
   }
+
+  const playersWithEmails = await Promise.all(
+    room.players.map(async player => ({
+      ...player,
+      email: await getUserEmail(player.userId)
+    }))
+  );
+
+  const message = {
+    message: "roomUpdate",
+    room: { ...room, players: playersWithEmails }
+  };
+
+  for (const player of room.players) {
+    try {
+      await apiGateway.postToConnection({
+        ConnectionId: player.connId,
+        Data: JSON.stringify(message)
+      }).promise();
+    } catch (err) {
+      console.error(`Notify failed: ${player.connId}`, err);
+    }
+  }
+
+  return { statusCode: 200 };
 }
 
 async function updateScores(players, winnerSymbol) {
@@ -157,4 +243,49 @@ async function updateScores(players, winnerSymbol) {
 
     await ddb.put({ TableName: USERS_TABLE, Item: stats }).promise();
   }
+}
+
+async function getUserStats(userId, connId) {
+  const statsRes = await ddb.get({
+    TableName: USERS_TABLE,
+    Key: { userId }
+  }).promise();
+
+  const stats = statsRes.Item || {
+    userId,
+    gamesPlayed: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0
+  };
+
+  const email = await getUserEmail(userId);
+
+  const message = {
+    type: "userStats",
+    email,
+    stats
+  };
+
+  try {
+    await apiGateway.postToConnection({
+      ConnectionId: connId,
+      Data: JSON.stringify(message)
+    }).promise();
+  } catch (err) {
+    console.error("❌ Failed to send stats:", err);
+  }
+
+  return { statusCode: 200 };
+}
+
+async function getUserEmail(userId) {
+  const cognito = new AWS.CognitoIdentityServiceProvider();
+  const userPoolId = "us-east-2_azti5AuYe";
+  const user = await cognito.adminGetUser({
+    UserPoolId: userPoolId,
+    Username: userId
+  }).promise();
+  const emailAttr = user.UserAttributes.find(attr => attr.Name === "email");
+  return emailAttr?.Value || "unknown@example.com";
 }
