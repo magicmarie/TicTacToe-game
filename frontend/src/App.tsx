@@ -28,11 +28,7 @@ function InnerApp() {
 export default function App() {
   return (
     <Router>
-      <WebSocketProvider
-        onMessage={(data) => {
-          console.log('Global WebSocket message:', data);
-        }}
-      >
+      <WebSocketProvider>
         <InnerApp />
       </WebSocketProvider>
     </Router>
