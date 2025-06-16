@@ -2,6 +2,7 @@ import { AppBar, Button, Toolbar, Typography } from '@mui/material';
 import ThemeToggleButton from './ThemeButton';
 import { signOut } from 'aws-amplify/auth';
 import { useNavigate } from 'react-router-dom';
+import { closeSocket } from '../lib/websocket';
 
 export default function AppHeader() {
   const navigate = useNavigate();
@@ -9,6 +10,7 @@ export default function AppHeader() {
 
   const handleLogout = async () => {
     try {
+      closeSocket();
       await signOut();
       localStorage.clear();
       navigate('/');

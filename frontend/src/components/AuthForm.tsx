@@ -24,7 +24,9 @@ export const AuthForm = () => {
     setLoading(true);
     try {
       await register(email, password);
-      setMessage('Signup successful! Check your email for the confirmation code.');
+      setMessage(
+        'Signup successful! Check your email for the confirmation code.'
+      );
       setStep('confirm');
     } catch (err: any) {
       setMessage(err.message || 'Error signing up');
@@ -50,11 +52,16 @@ export const AuthForm = () => {
       const response = await login(email, password);
       const session = await fetchSession();
       const idToken = session.tokens?.idToken?.toString();
-      console.log(response, "response", session, "session", idToken, "id token");
-      localStorage.setItem("token", idToken ?? "");
-      localStorage.setItem("isSignedIn", response.isSignedIn.toString())
+      console.log(
+        session,
+        'session',
+      );
+      localStorage.setItem('token', idToken ?? '');
+      localStorage.setItem('isSignedIn', response.isSignedIn.toString());
+      localStorage.setItem('userEmail', session.tokens?.signInDetails?.loginId ?? '');
+      localStorage.setItem('userId', session.userSub ?? '');
       setMessage('Signed in successfully!');
-      navigate("/board");
+      navigate('/board');
     } catch (err: any) {
       setMessage(err.message || 'Error signing in');
     }
