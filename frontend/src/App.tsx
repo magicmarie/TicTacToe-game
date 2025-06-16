@@ -27,10 +27,10 @@ function InnerApp() {
 
 export default function App() {
   return (
-    <Router>
-      <WebSocketProvider>
+    <WebSocketProvider>
+      <Router>
         <InnerApp />
-      </WebSocketProvider>
-    </Router>
+      </Router>
+    </WebSocketProvider>
   );
 }
