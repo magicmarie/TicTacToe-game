@@ -12,6 +12,7 @@ type GameBoardProps = {
   initialBoard: Cell[][] | null;
   currentTurn: Player | null;
   winner: boolean;
+  handleRestart: () => void;
 };
 
 export const GameBoard = ({
@@ -20,6 +21,7 @@ export const GameBoard = ({
   initialBoard,
   currentTurn,
   winner,
+  handleRestart
 }: GameBoardProps) => {
   const handleMove = (row: number, col: number) => {
     if (
@@ -27,9 +29,11 @@ export const GameBoard = ({
       initialBoard[row][col] ||
       winner ||
       currentTurn !== mySymbol
-    )
+    ) {
       return;
+    }
 
+    console.log('Made a move')
     // Send move via websocket
     sendMessage({
       action: 'makeMove',
@@ -81,7 +85,7 @@ export const GameBoard = ({
           )}
       </Grid>
 
-      <Button onClick={() => window.location.reload()} sx={{ mt: 2 }}>
+      <Button onClick={handleRestart}>
         Restart
       </Button>
     </Container>
