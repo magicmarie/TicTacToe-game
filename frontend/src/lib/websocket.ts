@@ -1,67 +1,62 @@
 const WEBSOCKET_URL = 'wss://821gxv78hl.execute-api.us-east-2.amazonaws.com/production';
 
 let socket: WebSocket | null = null;
+let gamePageListeners: ((data: unknown) => void)[] = [];
 
-export const connectSocket = (
-  roomId: string,
-  onMessage: (data: any) => void
-) => {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    console.log('WebSocket already connected');
+export const connectSocket = (onMessage: (data: unknown) => void) => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    console.error('No token found');
     return;
   }
 
-  socket = new WebSocket(WEBSOCKET_URL);
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    console.log('Already connected');
+    addGamePageListener(onMessage);
+    return;
+  }
 
-  socket.onopen = () => {
-    console.log('Connected to WebSocket');
+  socket = new WebSocket(`${WEBSOCKET_URL}?token=${token}`);
 
-    const joinMessage = {
-      action: 'joinRoom',
-      roomId,
-    };
-    if (socket) {
-      socket.send(JSON.stringify(joinMessage));
-    }
-  };
+  socket.onopen = () => console.log('WebSocket connected');
 
   socket.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      console.log('📨 Received from server:', data);
-      onMessage(data);
-    } catch (error) {
-      console.error('Failed to parse message:', error);
-    }
+    const data = JSON.parse(event.data);
+    gamePageListeners.forEach((fn) => fn(data));
   };
 
-  socket.onerror = (error) => {
-    console.error('WebSocket error:', error);
-  };
-
+  socket.onerror = (e) => console.error('WebSocket error', e);
   socket.onclose = () => {
-    console.warn('WebSocket connection closed');
+    console.warn('WebSocket closed');
     socket = null;
+    gamePageListeners = [];
   };
+
+  addGamePageListener(onMessage);
 };
 
-export const sendMove = (roomId: string, row: number, col: number) => {
+export const addGamePageListener = (listener: (data: unknown) => void) => {
+  if (!gamePageListeners.includes(listener)) gamePageListeners.push(listener);
+};
+
+export const sendMessage = (msg: object) => {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
-    console.warn('WebSocket not ready');
+    console.warn('WebSocket not open');
     return;
   }
-
-  const moveMessage = {
-    action: 'makeMove',
-    roomId,
-    row,
-    col,
-  };
-
-  socket.send(JSON.stringify(moveMessage));
+  socket.send(JSON.stringify(msg));
 };
 
 export const closeSocket = () => {
-  socket?.close();
+  if (socket) {
+    // Send the 'disconnect' message to the server before closing
+    socket.send(JSON.stringify({ action: '$disconnect' }));
+
+    // Gracefully close the socket
+    socket.close();
+  }
+
+  // Clear socket and listeners
   socket = null;
+  gamePageListeners = [];
 };
