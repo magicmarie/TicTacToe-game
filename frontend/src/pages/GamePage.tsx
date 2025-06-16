@@ -287,7 +287,7 @@ const GamePage: React.FC = () => {
   const handleLeaveRoom = () => {
     if (!token) return;
     console.log('leaving room...');
-    sendMessage({ action: 'leaveRoom', token });
+    sendMessage({ action: 'leaveRoom', token, roomId });
     localStorage.clear();
     navigate('/');
   };
