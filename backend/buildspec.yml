@@ -9,7 +9,7 @@ phases:
       - npm install
   build:
     commands:
-      - zip -r function.zip handler.js utils/ node_modules/
+      - zip -r function.zip index.js utils/ node_modules/
       - aws s3 cp function.zip s3://my-lambda-deployments-mariam/function.zip
 artifacts:
   files:

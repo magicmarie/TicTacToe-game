@@ -9,7 +9,7 @@ const CONNECTIONS_TABLE = "Connections";
 const USERS_TABLE = "UserStats";
 const apiGateway = new AWS.ApiGatewayManagementApi({
   apiVersion: "2018-11-29",
-  endpoint: "821gxv78hl.execute-api.us-east-2.amazonaws.com/production",
+  endpoint: "id6nuh4gs6.execute-api.us-east-1.amazonaws.com/production",
 });
 
 exports.handler = async (event) => {
@@ -59,7 +59,7 @@ exports.handler = async (event) => {
     case "restart":
       console.log("restart connId:", connId);
       return await restartGame(userId, connId, parsedBody.roomId);
-      
+
     case "getStats":
       console.log("getStats event:", event);
       return await getAllUserStats(connId);
@@ -136,8 +136,8 @@ async function leaveRoom(userId, roomId) {
 
   const updatedPlayers = room.players.filter(p => p.userId !== userId);
 
-  console.log("🧪 room.players before:", JSON.stringify(room.players));
-  console.log("🧪 leavingPlayer:", JSON.stringify(leavingPlayer));
+  console.log("room.players before:", JSON.stringify(room.players));
+  console.log("leavingPlayer:", JSON.stringify(leavingPlayer));
 
   if (updatedPlayers.length === 1) {
     console.log("only one player");
@@ -430,11 +430,11 @@ async function handleDisconnect(connId) {
 
 async function getUserEmail(userId) {
   const cognito = new AWS.CognitoIdentityServiceProvider();
-  const userPoolId = "us-east-2_azti5AuYe";
+  const userPoolId = "us-east-1_4rJjYWtYV";
   const user = await cognito.adminGetUser({
     UserPoolId: userPoolId,
     Username: userId
   }).promise();
   const emailAttr = user.UserAttributes.find(attr => attr.Name === "email");
   return emailAttr?.Value || "unknown@example.com";
-}s
+}
