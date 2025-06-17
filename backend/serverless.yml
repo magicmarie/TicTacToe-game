@@ -1,0 +1,254 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: "S3 bucket name for Lambda deployment package"
+  LambdaCodeS3Key:
+    Type: String
+    Description: "S3 object key for Lambda deployment package (zip file)"
+
+Resources:
+
+  GameRoomsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: GameRooms
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: roomId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: roomId
+          KeyType: HASH
+
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Connections
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+
+  UserStatsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UserStats
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: TicTacToeWebSocketAPI
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+
+  # Lambda Permission for WebSocket to invoke it
+  WebSocketLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt WebSocketHandler.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/*/@*
+
+
+  # Integration
+  WebSocketIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketHandler.Arn}/invocations
+
+  # WebSocket Routes
+  WebSocketConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      Target: !Join [ "/", [ "integrations", !Ref WebSocketIntegration ] ]
+
+  WebSocketDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      Target: !Join [ "/", [ "integrations", !Ref WebSocketIntegration ] ]
+
+  WebSocketJoinRoomRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: joinRoom
+      AuthorizationType: NONE
+      Target: !Join [ "/", [ "integrations", !Ref WebSocketIntegration ] ]
+
+  WebSocketMakeMoveRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: makeMove
+      AuthorizationType: NONE
+      Target: !Join [ "/", [ "integrations", !Ref WebSocketIntegration ] ]
+
+  WebSocketLeaveRoomRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: leaveRoom
+      AuthorizationType: NONE
+      Target: !Join [ "/", [ "integrations", !Ref WebSocketIntegration ] ]
+
+  WebSocketRestartRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: restart
+      AuthorizationType: NONE
+      Target: !Join [ "/", [ "integrations", !Ref WebSocketIntegration ] ]
+
+  WebSocketGetStatsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: getStats
+      AuthorizationType: NONE
+      Target: !Join [ "/", [ "integrations", !Ref WebSocketIntegration ] ]
+
+  # Deployment & Stage
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - WebSocketConnectRoute
+      - WebSocketDisconnectRoute
+      - WebSocketJoinRoomRoute
+      - WebSocketMakeMoveRoute
+      - WebSocketLeaveRoomRoute
+      - WebSocketRestartRoute
+      - WebSocketGetStatsRoute
+    Properties:
+      ApiId: !Ref WebSocketApi
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: production
+      ApiId: !Ref WebSocketApi
+      DeploymentId: !Ref WebSocketDeployment
+      AutoDeploy: true
+
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaDynamoDBCognitoApiGatewayPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt GameRoomsTable.Arn
+                  - !GetAtt ConnectionsTable.Arn
+                  - !GetAtt UserStatsTable.Arn
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  WebSocketHandler:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TicTacToeWebSocketHandler
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 512
+      Timeout: 10
+      Environment:
+        Variables:
+          ROOMS_TABLE: !Ref GameRoomsTable
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          USERS_TABLE: !Ref UserStatsTable
+          WEBSOCKET_API_ENDPOINT: !Sub ${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/production
+          USER_POOL_ID: "us-east-2_azti5AuYe"
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+
+  # ... (Your API Gateway integrations, route responses, and Lambda permissions unchanged)
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: TicTacToeUserPool
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: TicTacToeClient
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ADMIN_NO_SRP_AUTH
+        - USER_PASSWORD_AUTH
+
+Outputs:
+  WebSocketApiEndpoint:
+    Description: "WebSocket API Endpoint"
+    Value: !Sub wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/production
+
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref CognitoUserPool
+
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool App Client ID
+    Value: !Ref CognitoUserPoolClient
