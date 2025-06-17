@@ -1,0 +1,14 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+  build:
+    commands:
+      - npm install
+      - zip -r lambda-code.zip index.js node_modules
+
+artifacts:
+  files:
+    - lambda-code.zip
