@@ -26,7 +26,7 @@ export default function AppHeader() {
           Tic Tac Toe - G1
         </Typography>
         {token && (
-          <Button color="secondary" variant="outlined" onClick={handleLogout}>
+          <Button color="secondary" variant="contained" onClick={handleLogout}>
             Log out
           </Button>
         )}

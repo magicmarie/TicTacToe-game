@@ -4,7 +4,6 @@ import {
   Typography,
   Alert,
   Box,
-  Grid,
   Paper,
   Button,
   Snackbar,
@@ -12,7 +11,9 @@ import {
 import { GameBoard } from '../components/GameBoard';
 import { useWebSocket } from '../context/useWebSocket';
 import { addGamePageListener } from '../lib/websocket';
-import { type WebSocketMessage } from '../types';
+import { type WebSocketMessage, type UserStat } from '../types';
+import { StatsOverlay } from '../components/StatsOverlay';
+import { useNavigate } from 'react-router-dom';
 
 export type Player = 'X' | 'O';
 
@@ -28,12 +29,32 @@ export const formatUsername = (email?: string) => {
   return username.charAt(0).toUpperCase() + username.slice(1);
 };
 
+const getStatusColor = (
+  status: 'connected' | 'disconnected' | 'connecting...'
+) => {
+  switch (status) {
+    case 'connected':
+      return 'green';
+    case 'disconnected':
+      return 'orange';
+    case 'connecting...':
+      return 'blue';
+    default:
+      return 'black';
+  }
+};
+
 const GamePage: React.FC = () => {
-  const [opponentName, setOpponentName] = useState(localStorage.getItem("opponent") ||'');
+  const navigate = useNavigate();
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [opponentName, setOpponentName] = useState(
+    localStorage.getItem('opponent') || ''
+  );
   const [infoMsg, setInfoMsg] = useState('');
   const [error, setError] = useState('');
   const [gameBoardKey, setGameBoardKey] = useState(0);
   const [winnerMsg, setWinnerMsg] = useState('');
+  const [allStats, setAllStats] = useState<UserStat[]>([]);
 
   const [joinedRoom, setJoinedRoom] = useState(() => {
     const saved = localStorage.getItem('joinedRoom');
@@ -61,7 +82,7 @@ const GamePage: React.FC = () => {
     localStorage.getItem('currentTurn')
   );
 
-  const { sendMessage } = useWebSocket();
+  const { sendMessage, status, reconnect } = useWebSocket();
 
   const token = localStorage.getItem('token');
   const email = localStorage.getItem('userEmail');
@@ -130,6 +151,123 @@ const GamePage: React.FC = () => {
     }
   }, [joinedRoom, roomId, players, mySymbol, myName, board, currentTurn]);
 
+  const handleMessage = (data: unknown) => {
+    const wsData = data as WebSocketMessage;
+    console.log('WebSocket message received in GamePage:', wsData);
+    localStorage.setItem('data', JSON.stringify(wsData));
+
+    if (wsData.message?.includes('roomUpdate')) {
+      setJoinedRoom(true);
+      setRoomId(wsData.room?.roomId || '');
+      localStorage.setItem('roomId', wsData.room?.roomId || '');
+
+      if (wsData.room?.board) setBoard(wsData.room.board);
+      if (wsData.room?.currentTurn) setCurrentTurn(wsData.room.currentTurn);
+
+      const map: Record<Player, PlayerData | null> = { X: null, O: null };
+      wsData.room?.players?.forEach((p: unknown) => {
+        const player = p as { userId: string; symbol: Player; email: string };
+        map[player.symbol as Player] = {
+          name: player.email,
+          id: player.userId,
+          symbol: player.symbol,
+        };
+      });
+
+      setPlayers(map);
+      const me = wsData.room?.players
+        ? wsData.room.players.find(
+            (p: { userId: string; email?: string; symbol: Player }) =>
+              p.userId === userID || p.email === email
+          )
+        : undefined;
+
+      if (me) setMySymbol(me.symbol);
+
+      const opp = me?.symbol === 'X' ? map.O : map.X;
+      setOpponentName(opp?.name || '');
+      localStorage.setItem('opponent', opp?.name || '');
+
+      setInfoMsg(wsData.message || '');
+      return;
+    }
+
+    if (wsData.message === 'moveUpdate') {
+      if (wsData?.room?.board) {
+        setBoard(wsData?.room?.board);
+        localStorage.setItem('board', JSON.stringify(wsData?.room?.board));
+      }
+
+      if (wsData?.room?.currentTurn) {
+        setCurrentTurn(wsData?.room?.currentTurn);
+        localStorage.setItem('currentTurn', wsData?.room?.currentTurn);
+      }
+
+      if (wsData.gameOver) {
+        console.log('Is Game Over', wsData.gameOver);
+        setWinnerMsg(
+          wsData.winner === 'draw'
+            ? 'Game is a draw!'
+            : `${wsData.winner} wins!`
+        );
+        setGameBoardKey((k) => k + 1);
+      }
+    }
+
+    if (wsData.type === 'playerUpdate') {
+      const map: Record<Player, PlayerData | null> = { X: null, O: null };
+      if (wsData.players) {
+        wsData.players.forEach(
+          (p: { userId: string; email?: string; symbol: Player }) => {
+            map[p.symbol as Player] = {
+              name: p.email || '',
+              symbol: p.symbol,
+              id: p.userId,
+            };
+          }
+        );
+      }
+      setPlayers(map);
+      const opp = mySymbol === 'X' ? map.O : map.X;
+      setOpponentName(opp?.name || '');
+    }
+
+    if (wsData.type === 'gameOver') {
+      alert(
+        wsData.winner === 'draw' ? 'Game is a draw!' : `${wsData.winner} wins!`
+      );
+      setGameBoardKey((k) => k + 1);
+    }
+
+    if (wsData.message === 'statsUpdate' && Array.isArray(wsData.users)) {
+      localStorage.setItem('gameStats', JSON.stringify(wsData.users))
+      setAllStats(wsData.users);
+    }
+
+    if (wsData.message === 'leaveRoom') {
+      setJoinedRoom(false);
+      localStorage.clear();
+      setInfoMsg('You have left the room.');
+      return;
+    }
+
+    if (wsData.message === 'roomRestarted') {
+      if (wsData?.room?.board) {
+        setBoard(wsData?.room?.board);
+        localStorage.setItem('board', JSON.stringify(wsData?.room?.board));
+      }
+
+      if (wsData?.room?.currentTurn) {
+        setCurrentTurn(wsData?.room?.currentTurn);
+        localStorage.setItem('currentTurn', wsData?.room?.currentTurn);
+      }
+      setWinnerMsg('');
+      setGameBoardKey((k) => k + 1);
+      setInfoMsg('Game has been restarted.');
+      return;
+    }
+  };
+
   useEffect(() => {
     if (!token || !email) {
       setError('Missing user token or email');
@@ -137,97 +275,6 @@ const GamePage: React.FC = () => {
     }
 
     setMyName(email);
-
-    const handleMessage = (data: unknown) => {
-      const wsData = data as WebSocketMessage;
-      console.log('WebSocket message received in GamePage:', wsData);
-      localStorage.setItem('data', JSON.stringify(wsData));
-
-      if (wsData.message?.includes('roomUpdate')) {
-        setJoinedRoom(true);
-        setRoomId(wsData.room?.roomId || '');
-        localStorage.setItem('roomId', wsData.room?.roomId || '');
-
-        if (wsData.room?.board) setBoard(wsData.room.board);
-        if (wsData.room?.currentTurn) setCurrentTurn(wsData.room.currentTurn);
-
-        const map: Record<Player, PlayerData | null> = { X: null, O: null };
-        wsData.room?.players?.forEach((p: unknown) => {
-          const player = p as { userId: string; symbol: Player; email: string };
-          map[player.symbol as Player] = {
-            name: player.email,
-            id: player.userId,
-            symbol: player.symbol,
-          };
-        });
-
-        setPlayers(map);
-        const me = wsData.room?.players
-          ? wsData.room.players.find(
-              (p: { userId: string; email?: string; symbol: Player }) =>
-                p.userId === userID || p.email === email
-            )
-          : undefined;
-
-        if (me) setMySymbol(me.symbol);
-
-        const opp = me?.symbol === 'X' ? map.O : map.X;
-        setOpponentName(opp?.name || '');
-        localStorage.setItem("opponent", opp?.name || '');
-
-        setInfoMsg(wsData.message || '');
-        return;
-      }
-
-      if (wsData.type === 'moveUpdate') {
-        if (wsData.board) {
-          setBoard(wsData.board);
-          localStorage.setItem('board', JSON.stringify(wsData.board));
-        }
-
-        if (wsData.currentTurn) {
-          setCurrentTurn(wsData.currentTurn);
-          localStorage.setItem('currentTurn', wsData.currentTurn);
-        }
-
-        if (wsData.gameOver) {
-          console.log('called', wsData.gameOver, '--', wsData);
-          setWinnerMsg(
-            wsData.winner === 'draw'
-              ? 'Game is a draw!'
-              : `${wsData.winner} wins!`
-          );
-          setGameBoardKey((k) => k + 1);
-        }
-      }
-
-      if (wsData.type === 'playerUpdate') {
-        const map: Record<Player, PlayerData | null> = { X: null, O: null };
-        if (wsData.players) {
-          wsData.players.forEach(
-            (p: { userId: string; email?: string; symbol: Player }) => {
-              map[p.symbol as Player] = {
-                name: p.email || '',
-                symbol: p.symbol,
-                id: p.userId,
-              };
-            }
-          );
-        }
-        setPlayers(map);
-        const opp = mySymbol === 'X' ? map.O : map.X;
-        setOpponentName(opp?.name || '');
-      }
-
-      if (wsData.type === 'gameOver') {
-        alert(
-          wsData.winner === 'draw'
-            ? 'Game is a draw!'
-            : `${wsData.winner} wins!`
-        );
-        setGameBoardKey((k) => k + 1);
-      }
-    };
 
     addGamePageListener(handleMessage);
   }, []);
@@ -237,16 +284,62 @@ const GamePage: React.FC = () => {
     sendMessage({ action: 'joinRoom', token });
   };
 
+  const handleLeaveRoom = () => {
+    if (!token) return;
+    console.log('leaving room...');
+    sendMessage({ action: 'leaveRoom', token, roomId });
+    localStorage.clear();
+    navigate('/');
+  };
+
+  const handleRestartGame = () => {
+    if (!token) return;
+    console.log('Restarting Game...', roomId)
+    sendMessage({ action: 'restart', token, roomId });
+  };
+
+  const handleGetStats = () => {
+    if (!token) return;
+    console.log('Getting stats...');
+    sendMessage({ action: 'getStats', token });
+  };
+
   const bothPlayersJoined = players.X && players.O && mySymbol;
-  console.log(players, 'pppp---', mySymbol);
+  const isAlreadyInRoom = players.X?.id === userID || players.O?.id === userID;
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Typography sx={{ mb: 1 }}>
+          WebSocket status:{' '}
+          <strong
+            style={{
+              color: getStatusColor(
+                status as 'connected' | 'disconnected' | 'connecting...'
+              ),
+            }}
+          >
+            {status}
+          </strong>
+        </Typography>
+        {status !== 'connected' && (
+          <Button
+            onClick={reconnect}
+            size="small"
+            variant="outlined"
+            sx={{ ml: 2 }}
+          >
+            Retry Connection
+          </Button>
+        )}
+      </Box>
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
       )}
+
       {infoMsg && (
         <>
           <Alert severity="success" sx={{ mb: 2 }}>
@@ -261,17 +354,19 @@ const GamePage: React.FC = () => {
           />
         </>
       )}
+
       {winnerMsg && (
         <Alert severity="success" sx={{ mb: 2 }}>
           {winnerMsg}
         </Alert>
       )}
+
       {!joinedRoom ? (
         <Box textAlign="center" mt={5}>
           <Button
             variant="contained"
             size="large"
-            disabled={joinedRoom}
+            disabled={joinedRoom || isAlreadyInRoom}
             onClick={handleJoinRoom}
           >
             Join Game Room
@@ -289,13 +384,38 @@ const GamePage: React.FC = () => {
               )}
             </Alert>
           )}
+
           <Box
             sx={{
-              pt: 4,
+              borderBottom: '1px solid black',
+              mb: 3,
+              pb: 2,
               display: 'flex',
-              flexDirection: ['column', 'row'],
               justifyContent: 'space-between',
               gap: 2,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Button
+              variant="outlined"
+              onClick={() => {
+                handleGetStats();
+                setStatsOpen(true);
+              }}
+            >
+              Show Stats / Leaderboard
+            </Button>
+            <Button variant="outlined" color="error" onClick={handleLeaveRoom}>
+              Leave Room
+            </Button>
+          </Box>
+
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: ['column', 'row'],
+              gap: 4,
+              alignItems: 'flex-start',
             }}
           >
             <Box flex={1}>
@@ -312,6 +432,7 @@ const GamePage: React.FC = () => {
                   initialBoard={board}
                   winner={winnerMsg !== ''}
                   currentTurn={currentTurn as Player | null}
+                  handleRestart={handleRestartGame}
                 />
               ) : (
                 <Typography align="center" sx={{ mt: 5 }}>
@@ -319,33 +440,33 @@ const GamePage: React.FC = () => {
                 </Typography>
               )}
             </Box>
-            <Grid size={12}>
-              <Paper sx={{ p: 2 }}>
-                <Typography variant="subtitle1" gutterBottom>
-                  Players:
+
+            <Paper sx={{ p: 2, minWidth: 240 }}>
+              <Typography variant="subtitle1" gutterBottom>
+                Players:
+              </Typography>
+              <Typography>
+                X: {players.X?.name ? formatUsername(players.X?.name) : '---'}
+              </Typography>
+              <Typography>
+                O: {players.O?.name ? formatUsername(players.O?.name) : '---'}
+              </Typography>
+              {currentTurn && (
+                <Typography sx={{ mt: 1 }}>
+                  <strong>Current Turn:</strong> {currentTurn}
                 </Typography>
-                <Typography>
-                  X:{' '}
-                  {players.X?.name
-                    ? formatUsername(players.X?.name)
-                    : '---'}
-                </Typography>
-                <Typography>
-                  O:{' '}
-                  {players.O?.name
-                    ? formatUsername(players.O?.name)
-                    : '---'}
-                </Typography>
-                {currentTurn && (
-                  <Typography sx={{ mt: 1 }}>
-                    <strong>Current Turn:</strong> {currentTurn}
-                  </Typography>
-                )}
-              </Paper>
-            </Grid>
+              )}
+            </Paper>
           </Box>
         </>
       )}
+
+      <StatsOverlay
+        open={statsOpen}
+        onClose={() => setStatsOpen(false)}
+        statsData={allStats}
+        currentUserEmail={email || ''}
+      />
     </Container>
   );
 };
